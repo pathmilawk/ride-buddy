@@ -1,0 +1,45 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* NFR-5: mobile-first. Base tokens serve a phone viewport; nothing here assumes width. */
+:root {
+  --background: 210 20% 98%;
+  --foreground: 222 47% 11%;
+  --card: 0 0% 100%;
+  --muted: 210 16% 93%;
+  --muted-foreground: 215 16% 42%;
+  --border: 214 20% 86%;
+  --primary: 221 83% 45%;
+  --primary-foreground: 0 0% 100%;
+  --destructive: 0 72% 45%;
+  --destructive-foreground: 0 0% 100%;
+  --accent: 221 83% 96%;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: 222 47% 9%;
+    --foreground: 210 20% 96%;
+    --card: 222 40% 13%;
+    --muted: 222 30% 18%;
+    --muted-foreground: 215 18% 68%;
+    --border: 222 25% 25%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 222 47% 9%;
+    --destructive: 0 72% 58%;
+    --destructive-foreground: 222 47% 9%;
+    --accent: 222 40% 18%;
+  }
+}
+
+html {
+  color-scheme: light dark;
+}
+
+body {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  /* No horizontal scrolling at any width (NFR-5). */
+  overflow-x: hidden;
+}
