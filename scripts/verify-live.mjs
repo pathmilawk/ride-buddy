@@ -67,7 +67,8 @@ function check(label, actual, expected) {
 }
 
 function cleanup() {
-  sql(`delete from ride_requests where id::text like '${PREFIX}2222%';
+  sql(`delete from notifications where user_id::text like '${PREFIX}0000%';
+       delete from ride_requests where id::text like '${PREFIX}2222%';
        delete from rides where id::text like '${PREFIX}1111%';
        delete from profiles where id::text like '${PREFIX}0000%';
        delete from auth.users where id::text like '${PREFIX}0000%';`);
@@ -164,6 +165,32 @@ check("both requests now cancelled", sql(`select count(*) from ride_requests whe
 
 console.log("\nBR-3.25 - disclosure follows state, so cancelling closes the window");
 check("B can no longer read A's profile", asUser(B, `select count(*) from profiles where id='${A}';`), "0");
+
+console.log("\nFR-42 (amended) - notifications, created by triggers on the state change itself");
+// The fixtures above already exercised the events: two requests were created (pending), one was
+// accepted, and the ride was then cancelled - cascading both requests.
+check("driver was told about each request",
+  sql(`select count(*) from notifications where user_id='${A}' and kind='request_received';`).out, "2");
+check("accepted passenger was told",
+  sql(`select count(*) from notifications where user_id='${B}' and kind='request_accepted';`).out, "1");
+check("both passengers told the ride was cancelled",
+  sql(`select count(*) from notifications where kind='ride_cancelled' and user_id in ('${B}','${C}');`).out, "2");
+check("the cancelling driver was NOT notified",
+  sql(`select count(*) from notifications where user_id='${A}' and kind='ride_cancelled';`).out, "0");
+check("every notification starts unread",
+  sql(`select count(*) from notifications where user_id::text like '${PREFIX}0000%' and read_at is null;`).out,
+  sql(`select count(*) from notifications where user_id::text like '${PREFIX}0000%';`).out);
+check("a user sees only their own",
+  asUser(C, `select count(*) from notifications where user_id='${A}';`), "0");
+check("a user cannot fabricate one for someone else",
+  /ERROR/.test(asUser(C, `insert into notifications (user_id, kind, ride_id) values ('${A}','request_received','${RIDE}');`))
+    ? "refused" : "ALLOWED", "refused");
+check("marking read works, and only on your own",
+  (() => { asUser(B, `update notifications set read_at = now() where user_id='${B}';`);
+           return sql(`select count(*) from notifications where user_id='${B}' and read_at is not null;`).out; })(),
+  sql(`select count(*) from notifications where user_id='${B}';`).out);
+check("realtime is enabled on the table",
+  sql(`select count(*) from pg_publication_tables where pubname='supabase_realtime' and tablename='notifications';`).out, "1");
 
 cleanup();
 console.log("\nFixtures removed.");

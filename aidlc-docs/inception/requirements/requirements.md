@@ -170,7 +170,7 @@ messaging that would make such a reversal explainable to the passenger.
 | FR-39 | **My Rides** lists the signed-in user's upcoming rides as driver, each with its requests and their statuses. | Q16=A |
 | FR-40 | **My Requests** lists the signed-in user's upcoming seat requests as passenger, each with its current status. | Q16=A |
 | FR-41 | Both views show upcoming items only. No history section. | Q16=A |
-| FR-42 | Status is communicated **in-app only**. There are no email or push notifications of any kind. | Q15=A |
+| FR-42 | Status is communicated in-app, with an in-app notification bell, unread badge and list, plus OS-level browser notifications. **No email.** *(Amended 2026-09-03 - see below.)* | Q15=A, amended |
 
 ---
 
@@ -256,6 +256,39 @@ added, since it would bypass every policy.
 
 **Raised by**: the product owner, on finding their Supabase project offered no anon key.
 
+
+### Amendment to FR-42 - 2026-09-03
+
+**Original wording**: status is communicated in-app only; there are no notifications of any kind
+(Q15=A).
+
+**Amended to**: an in-app notification bell with an unread badge and a dropdown list, plus
+OS-level browser notifications via the Web Notifications API. Still **no email** - that was the
+part of Q15=C nobody asked for.
+
+**Why**: the product owner asked for it directly. What has been built is essentially **Q15=B**
+("in-app notification/badge list only") plus the OS-toast half, delivered live over Supabase
+Realtime.
+
+**What this closes**: section 9.2 recorded that a passenger learns of a cancellation only by
+opening the app, and called it a real usability gap accepted for a POC. **That gap is now
+closed** - the cancellation cascade fires a notification to every affected passenger.
+
+**Scope of the change**:
+- New: `notifications` table, four notification kinds, two triggers on `ride_requests`,
+  Realtime on the new table, a bell component in the shared layout
+- Unchanged: every other requirement. No existing table, policy, function or trigger was
+  altered. The notification triggers *compose* with the FR-38 cascade rather than replacing it
+- Out of scope still: email, and a notification for a withdrawal (the "everything including
+  withdrawals" option was offered and declined)
+
+**Design note**: notifications are created by **database triggers**, not application code, for
+the same reason the capacity guarantee and the cancellation cascade are - a future code path
+cannot forget to notify. The table has no insert policy for users, so nobody can fabricate a
+notification for someone else.
+
+**Raised by**: the product owner.
+
 ---
 
 ## 8. Out of Scope
@@ -316,14 +349,18 @@ accepted request.
 is served from any publicly reachable URL. This is the single highest-priority item in any
 follow-up work.
 
-### 9.2 LIMITATION - cancellations are silent
+### 9.2 ~~LIMITATION - cancellations are silent~~ RESOLVED 2026-09-03
 
-FR-16 lets a driver cancel a ride; FR-42 provides no notifications. An accepted passenger
-therefore discovers a cancellation only by opening the app. FR-38 at least guarantees the
-status they see is correct.
+**This limitation no longer applies.** It originally read: a driver can cancel a ride, FR-42
+provides no notifications, so an accepted passenger discovers it only by opening the app.
 
-Tolerable for a POC among colleagues in one office who exchange phone numbers on acceptance
-(FR-30). It would not be acceptable in a real product.
+The FR-42 amendment closed it. Cancelling a ride cascades every request to `cancelled`
+(FR-38), and the notification trigger fires once per affected request - so every passenger who
+held a seat is told, in-app and, if the tab is not focused, as an OS notification.
+
+Retained here rather than deleted, because the reasoning is worth keeping: the gap was
+identified during Requirements Analysis, accepted deliberately, and then closed when the
+product owner decided the trade was no longer worth making.
 
 ### 9.3 LIMITATION - no data deletion path
 

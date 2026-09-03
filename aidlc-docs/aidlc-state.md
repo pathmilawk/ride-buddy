@@ -5,7 +5,7 @@
 - **Project Type**: Greenfield
 - **Start Date**: 2026-09-03T05:04:58Z
 - **Current Phase**: CONSTRUCTION
-- **Current Stage**: Build and Test COMPLETE and VERIFIED LIVE - awaiting approval before Operations.
+- **Current Stage**: Notifications feature COMPLETE and VERIFIED LIVE (post-Build-and-Test enhancement).
 - **Rule Details Directory**: `.aidlc-rule-details/`
 
 ## Workspace State
@@ -727,3 +727,65 @@ enforced by the **service**, not the database. Same class as the capacity bypass
 General point worth carrying forward: **RLS policies are necessarily broader than the business
 rules they support**, so some rules are service-only. Both instances are documented rather than
 silently relied upon.
+
+## FEATURE ADDED - Notifications (amends FR-42)
+
+**Requested after Build and Test.** In-app bell with unread badge and dropdown list, plus
+OS-level browser notifications, delivered live over Supabase Realtime.
+
+### Amends an approved decision
+FR-42 / Q15=A chose "no notifications of any kind"; section 9.2 recorded silent cancellation as
+an accepted consequence. Both amended **visibly** - FR-42 carries an *(Amended)* marker plus a
+full amendment section, and **section 9.2 is marked RESOLVED** with its original text kept,
+because the reasoning is worth preserving.
+
+Effectively Q15=B, which was declined at the time, plus the OS-toast half.
+
+### Four events
+| Event | Recipient |
+|---|---|
+| Seat request created | the driver |
+| Request accepted | the passenger |
+| Request declined | the passenger |
+| Ride cancelled | every passenger who held a seat |
+
+A withdrawal notifies nobody - deliberate; "everything including withdrawals" was declined.
+
+### Built consistently with the existing posture
+- **Triggers create notifications**, not application code - a code path cannot forget to notify
+- **No insert policy for users**, so nobody can fabricate one for someone else (verified refused)
+- **Composes with 0008**: the cancellation cascade updates each request, firing the notify
+  trigger per affected passenger. No ride-level notification needed
+- **Message text is not stored** - only `kind` and ids; wording is a pure, unit-tested function
+- **Badge is server-rendered**, correct on first paint without JS
+- **OS permission on first bell click**, never on page load; toast only when the tab is hidden
+
+### New files
+`supabase/migrations/0010_notifications.sql` · `lib/notification-text.ts` ·
+`db/repositories/notification-repository.ts` · `services/notification-service.ts` ·
+`features/notifications/actions.ts` ·
+`features/notifications/components/NotificationBell.tsx` ·
+`tests/unit/notification-text.test.ts`. `components/AppNav.tsx` modified in place.
+
+## TOOLING FLAW FIXED - db:push had no migration ledger
+It re-ran every migration every time, so adding a tenth failed on "type already exists" and the
+schema could not be extended without a full reset. Added `_ride_buddy_migrations` with a
+sentinel query per migration, so an existing database is recognised rather than re-applied.
+Verified: detected 9 applied, ran only the new one, and re-running is a clean no-op.
+
+## Final verified state
+| Check | Result |
+|---|---|
+| Type check | Clean |
+| Unit tests | **113/113** (10 suites) |
+| Production build | 11/11 pages |
+| Schema | Verified, 10 migrations |
+| Live rules + notifications | **26/26** (`npm run verify:live`) |
+| `db:push` idempotency | Confirmed |
+
+### Remaining known items, unchanged
+1. **Anyone can register** (§9.1) - BLOCKING before public deployment
+2. **A driver can overbook their own ride** via the REST API, bypassing the capacity function -
+   low severity, documented with the fix in `security-test-instructions.md` check 3
+3. **Self-request refusal is service-enforced**, not database-enforced - same class as (2)
+4. Users cannot delete a notification, only mark it read - intended, no delete policy

@@ -1,5 +1,7 @@
 import Link from "next/link";
 import * as profileService from "@/services/profile-service";
+import * as notificationService from "@/services/notification-service";
+import { NotificationBell } from "@/features/notifications/components/NotificationBell";
 import { SignOutButton } from "@/features/auth/components/SignOutButton";
 
 /**
@@ -9,7 +11,11 @@ import { SignOutButton } from "@/features/auth/components/SignOutButton";
  * Shows the display name when set, otherwise the email. Never shows a phone number.
  */
 export async function AppNav() {
-  const result = await profileService.getOrCreateMyProfile();
+  const [result, notifications, unread] = await Promise.all([
+    profileService.getOrCreateMyProfile(),
+    notificationService.listRecent(),
+    notificationService.unreadCount(),
+  ]);
   const label = result.ok ? (result.value.displayName ?? result.value.email) : "";
 
   return (
@@ -44,7 +50,15 @@ export async function AppNav() {
           My requests
         </Link>
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-1 sm:gap-2">
+          {/* Server-rendered initial state, so the badge is right on first paint without JS. */}
+          {result.ok ? (
+            <NotificationBell
+              initialItems={notifications.ok ? notifications.value : []}
+              initialUnread={unread}
+              userId={result.value.id}
+            />
+          ) : null}
           <Link
             href="/profile"
             data-testid="app-nav-profile-link"

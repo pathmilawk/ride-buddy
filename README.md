@@ -17,9 +17,39 @@ Built with the AI-DLC workflow. The full decision trail lives in [`aidlc-docs/`]
 | 1 Foundation | Registration, sign-in, profiles, areas, the completeness gate | **Done** |
 | 2 Ride Offering and Discovery | Publish a ride, cancel it, search, contact withholding | **Done** |
 | 3 Requests and Matching | Seat requests, accept/reject, capacity guarantee, contact exchange | **Done** |
+| + Notifications | In-app bell, unread badge, list, OS toasts, live over Realtime | **Done** |
 
 The full flow works: register, complete your profile, publish a ride, find a colleague's ride,
 ask for a seat, accept or decline, and exchange phone numbers once a seat is agreed.
+
+### Notifications
+
+A bell in the header with an unread badge and a dropdown list, plus OS-level browser
+notifications when the tab is not focused. Four events notify:
+
+| Event | Who is told |
+|---|---|
+| Someone asks for a seat | the **driver** |
+| Request accepted | the **passenger** |
+| Request declined | the **passenger** |
+| Ride cancelled | **every** passenger who held a seat |
+
+A withdrawal notifies nobody - the passenger did it themselves.
+
+Two things worth knowing about how it works:
+
+- **Notifications are created by database triggers**, not application code, for the same reason
+  the capacity guarantee and the cancellation cascade are: a future code path cannot forget to
+  notify. The table has no insert policy for users, so nobody can fabricate one for someone else.
+- **The badge is server-rendered**, so it is correct on first paint with no JavaScript. Supabase
+  Realtime only carries what arrives afterwards.
+
+The OS permission prompt appears on your **first click of the bell**, never on page load, and a
+desktop toast only fires when the tab is not visible - a notification for something already on
+screen is just noise.
+
+This amends FR-42, which originally chose no notifications at all. It closes the gap
+`requirements.md` §9.2 recorded: a passenger used to learn of a cancellation only by looking.
 
 ### What has been proven
 
@@ -27,16 +57,17 @@ Verified against a live Supabase project, not just in principle:
 
 | Check | Result |
 |---|---|
-| Type check, unit tests, production build | Clean, **101/101**, 11/11 pages |
-| Schema applied and verified | All 9 migrations; 24 object/policy/constraint checks pass |
+| Type check, unit tests, production build | Clean, **113/113**, 11/11 pages |
+| Schema applied and verified | All 10 migrations; 24 object/policy/constraint checks pass |
 | **Seat capacity under concurrent acceptance** | **PASS** — two simultaneous acceptances against one seat: one wins, the other blocks on the row lock then gets `RIDE_FULL`. The ride is not overbooked |
 | **Contact released only to an accepted pair, both directions** | **PASS**, as real authenticated users |
 | **Contact withheld from everyone else** | **PASS** — `public_profiles` has no phone column to leak |
 | **Cancellation cascades to every request** | **PASS**, and contact access closes with it |
 | Duplicate requests, seat bounds | **PASS** |
+| **Notifications - all four events, RLS, no fabrication** | **PASS** |
 | Authenticated pages render real data | **PASS** — 16 checks, including no phone number on search and the phone present for an accepted pair |
 
-Re-run the database half any time with `npm run verify:live` (17 checks, self-cleaning).
+Re-run the database half any time with `npm run verify:live` (26 checks, self-cleaning).
 
 ### What has not
 
@@ -166,7 +197,7 @@ prompted to complete your profile.
 | `npm test` | Run the unit tests |
 | `npm run typecheck` | Type-check without emitting |
 | `npm run db:status` | What exists in the project right now (publishable key only) |
-| `npm run db:push` | Apply every migration in order, stopping at the first failure |
+| `npm run db:push` | Apply any **pending** migrations in order, tracked in a ledger so it is safe to re-run |
 | `npm run db:seed` | Apply the seed data (re-runnable) |
 | `npm run db:verify` | Check tables, views, functions, triggers, RLS, policies and constraints |
 | `npm run db:setup` | push, then seed, then verify |
@@ -189,9 +220,9 @@ There are no repository, action, or component tests. Repositories are thin datab
 with no logic; actions hold no business rules by construction; and no DOM test environment is
 configured.
 
-101 tests across 9 suites: the completeness gate, validation schemas, the result type, ride
-derivations, ride schemas, the contact projection, request transitions, request expiry, and the
-accepted-contact type boundary.
+113 tests across 10 suites: the completeness gate, validation schemas, the result type, ride
+derivations, ride schemas, the contact projection, request transitions, request expiry, the
+accepted-contact type boundary, and notification wording.
 
 Three assert *decisions* rather than behaviour, so a later change fails loudly instead of
 silently reversing a choice: that any email domain registers, that a same-area ride is accepted,

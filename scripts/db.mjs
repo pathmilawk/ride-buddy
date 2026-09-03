@@ -153,6 +153,69 @@ Connection string -> URI, and choose the SESSION pooler (port 5432), not transac
   return false;
 }
 
+/**
+ * Migration ledger.
+ *
+ * The first version of `push` re-ran every file every time, so a second run failed with
+ * "type already exists" and the schema could never be extended without a full reset. That was
+ * a real flaw, not a rough edge - adding a tenth migration is an ordinary thing to do.
+ *
+ * Each migration is paired with a SENTINEL: a query that returns 1 if that migration's work is
+ * already present. On first run the ledger is seeded from those sentinels, so an existing
+ * database is recognised rather than re-applied or wiped.
+ */
+const LEDGER = "_ride_buddy_migrations";
+
+const SENTINELS = {
+  "0001_areas.sql": "select count(*) from information_schema.tables where table_name='areas'",
+  "0002_profiles.sql": "select count(*) from information_schema.tables where table_name='profiles'",
+  "0003_rls_policies.sql": "select count(*) from pg_policies where policyname='profiles_select_own'",
+  "0004_rides.sql": "select count(*) from information_schema.tables where table_name='rides'",
+  "0005_public_profiles.sql": "select count(*) from information_schema.views where table_name='public_profiles'",
+  "0006_ride_requests.sql": "select count(*) from information_schema.tables where table_name='ride_requests'",
+  "0007_accept_request_function.sql": "select count(*) from pg_proc where proname='accept_ride_request'",
+  "0008_cancel_ride_cascade_trigger.sql": "select count(*) from pg_trigger where tgname='rides_cancel_cascade'",
+  "0009_accepted_pair_profile_policy.sql": "select count(*) from pg_policies where policyname='profiles_select_accepted_counterparty'",
+  "0010_notifications.sql": "select count(*) from information_schema.tables where table_name='notifications'",
+};
+
+function ensureLedger(files) {
+  query(`create table if not exists ${LEDGER} (
+           filename text primary key,
+           applied_at timestamptz not null default now(),
+           seeded boolean not null default false
+         );`);
+
+  // Seed on first use: anything whose sentinel already reports present was applied before this
+  // ledger existed. Recorded with seeded=true so the distinction stays visible.
+  const known = (query(`select count(*) from ${LEDGER};`) ?? "0").trim();
+  if (known !== "0") return;
+
+  let seeded = 0;
+  for (const file of files) {
+    const name = path.basename(file);
+    const sentinel = SENTINELS[name];
+    if (!sentinel) continue;
+    if ((query(sentinel) ?? "0").trim() !== "0") {
+      query(`insert into ${LEDGER} (filename, seeded) values ('${name}', true)
+             on conflict (filename) do nothing;`);
+      seeded++;
+    }
+  }
+  if (seeded > 0) {
+    console.log(`Ledger created; ${seeded} migration(s) detected as already applied.\n`);
+  }
+}
+
+function appliedSet() {
+  const out = query(`select filename from ${LEDGER};`) ?? "";
+  return new Set(out.split("\n").map((s) => s.trim()).filter(Boolean));
+}
+
+function recordApplied(name) {
+  query(`insert into ${LEDGER} (filename) values ('${name}') on conflict (filename) do nothing;`);
+}
+
 function migrationFiles() {
   if (!existsSync(MIGRATIONS)) return [];
   return readdirSync(MIGRATIONS)
@@ -209,23 +272,36 @@ function push() {
   }
   if (!checkConnection()) process.exit(1);
 
-  console.log(`Applying ${files.length} migrations in order:`);
+  ensureLedger(files);
+  const already = appliedSet();
+  const pending = files.filter((f) => !already.has(path.basename(f)));
+
+  if (pending.length === 0) {
+    console.log(`All ${files.length} migrations are already applied. Nothing to do.`);
+    return;
+  }
+
+  console.log(
+    `${already.size} already applied, ${pending.length} pending:`,
+  );
   let applied = 0;
-  for (const file of files) {
-    if (!runFile(file, path.basename(file))) {
+  for (const file of pending) {
+    const name = path.basename(file);
+    if (!runFile(file, name)) {
       if (applied === 0) {
-        console.error("\nFailed on the first migration - nothing was applied.");
+        console.error("\nFailed on the first pending migration - nothing new was applied.");
       } else {
         console.error(
-          `\nStopped after ${applied} of ${files.length} migrations - the schema is PARTIALLY applied.`,
+          `\nStopped after ${applied} of ${pending.length} pending migrations - PARTIALLY applied.`,
         );
-        console.error("Run `npm run db:reset` to start clean, rather than re-running push.");
+        console.error("Fix the cause and re-run push; migrations that succeeded are recorded.");
       }
       process.exit(1);
     }
+    recordApplied(name);
     applied++;
   }
-  console.log(`\nAll ${applied} migrations applied. Now run \`npm run db:seed\`.`);
+  console.log(`\n${applied} migration(s) applied.`);
 }
 
 function seed() {
@@ -372,6 +448,7 @@ function reset() {
     "drop table if exists profiles;",
     "drop function if exists set_updated_at();",
     "drop table if exists areas;",
+    `drop table if exists ${LEDGER};`,
     "drop type if exists request_status;",
     "drop type if exists ride_status;",
     "drop type if exists user_role;",

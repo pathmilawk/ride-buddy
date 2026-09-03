@@ -1923,3 +1923,104 @@ Verified after the fix: 07:30, 08:00, 07:45, 08:15 morning departures and a 16:3
 | Ada's phone on Alan's My Requests | Confirmed - accepted pair, FR-30 |
 
 ---
+
+## FEATURE - Notifications (amends FR-42)
+**Timestamp**: 2026-09-03T05:04:58Z
+**User Input**: "I want to have browser in app notifications. Do the impl"
+**AI Response**: "Implemented in-app notifications (bell, unread badge, dropdown list) plus OS-level browser notifications, delivered live over Supabase Realtime and created by database triggers. Amended FR-42 visibly and marked section 9.2's limitation RESOLVED. Verified live: 4/4 events, RLS, no fabrication, mark-as-read, Realtime enabled."
+**Context**: Post-CONSTRUCTION feature request, reversing a recorded decision
+
+### PROCESS DEVIATION - compressed the AI-DLC workflow
+CLAUDE.md mandates the adaptive workflow for software development requests. The user said "do
+the impl", so instead of a full Requirements Analysis / Workflow Planning / Functional Design /
+Code Generation cycle I ran a **minimal-depth pass**: four clarifying questions covering the
+genuinely decision-shaping ambiguities, then implementation, then a visible amendment to the
+requirement being contradicted.
+
+Recorded as a deviation, with the reason. The questions were not skipped because "browser in-app
+notifications" is genuinely ambiguous - it names two different mechanisms - and building the
+wrong one would have wasted the work.
+
+### AMENDS AN APPROVED DECISION - stated, not slid past
+FR-42 / Q15=A chose "in-app status only, no notifications of any kind". Section 9.2 recorded
+silent cancellation as an accepted consequence. What was built is essentially **Q15=B**
+("in-app notification/badge list"), which the product owner declined at the time, plus the
+OS-toast half.
+
+Both documents amended visibly: FR-42's row carries an *(Amended)* marker with a full amendment
+section, and **section 9.2 is marked RESOLVED** with its original text retained, because the
+reasoning is worth keeping - the gap was identified, accepted deliberately, then closed when the
+trade stopped being worth making.
+
+### Design decisions (user answered all four)
+| Question | Choice |
+|---|---|
+| Type | In-app bell + badge + list, **plus** OS toasts via the Web Notifications API |
+| Delivery | **Supabase Realtime** on `postgres_changes` |
+| Storage | A `notifications` table with a read flag |
+| Events | Request received (driver); accepted, declined, ride cancelled (passenger) |
+
+**Correction I made to my own question**: the option label said "all five state changes" but its
+description listed **four** events. I built the four described rather than inventing a fifth, and
+said so.
+
+### Implementation, consistent with the existing posture
+- **Notifications are created by TRIGGERS**, not application code - the same reasoning that put
+  the capacity guarantee and the cancellation cascade in the database. A future code path cannot
+  forget to notify.
+- **No insert policy for users** on the table, so nobody can fabricate a notification for someone
+  else - the same reasoning that keeps `driver_id` off the ride form. Verified: refused.
+- **The triggers compose with 0008.** Cancelling a ride fires the cascade, which updates each
+  request, which fires the notify trigger once per affected passenger. No ride-level notification
+  was needed.
+- **The message text is NOT stored** - only `kind` and the ids. Wording comes from a pure
+  function (`lib/notification-text.ts`), so copy is editable without a data migration and is
+  unit-testable. Same pattern as `describeMissingFields` and `displayStatus`.
+- **The badge is server-rendered**, correct on first paint without JavaScript; Realtime carries
+  only what arrives afterwards.
+- **OS permission is requested on the first bell CLICK, never on page load**, and a toast fires
+  only when the tab is not visible.
+
+### A REAL FLAW IN MY OWN TOOLING, found and fixed
+`db:push` re-ran **every** migration every time, so adding a tenth failed with "type area_kind
+already exists" and the schema could not be extended without a full reset. That is not a rough
+edge - adding a migration is an ordinary thing to do.
+
+Fixed with a **migration ledger** (`_ride_buddy_migrations`). Each migration is paired with a
+sentinel query, so on first use an existing database is recognised rather than re-applied or
+wiped. Verified: it detected 9 already applied, ran only the new one, and a second `db:push` is
+now a clean no-op. `db:reset` drops the ledger too, or push would think everything was still
+applied.
+
+### Verified live - 13 dedicated checks, then folded into the repeatable script
+All four events fire to the right recipient; a withdrawal notifies nobody; RLS confines a user to
+their own rows; fabrication is refused; mark-as-read works and only on your own rows; Realtime is
+on the publication. `npm run verify:live` grew from 17 to **26 checks, all passing**.
+
+### Three quoting errors of my own this session, and the lesson
+1. A regex inside a quoted heredoc that double-escaped into invalid syntax.
+2. Nested quotes in an inline `node -e` that failed to parse.
+3. **Double quotes for a SQL string literal** - which is an *identifier* in SQL, so the query
+   errored and returned empty output. I briefly read that as "the triggers did not fire" before
+   checking properly and finding they had, correctly.
+
+The lesson, applied for the rest of the session: write scripts to files rather than inlining
+them through two layers of quoting. Recorded because the third one nearly produced a wrong
+conclusion about working code.
+
+### Also noticed
+Users **cannot delete** a notification, only mark it read - there is no delete policy. That is
+the intended design, and it is why an earlier REST cleanup of mine silently did nothing. Worth
+knowing rather than rediscovering.
+
+### Final state
+| Check | Result |
+|---|---|
+| `npx tsc --noEmit` | Clean |
+| `npx vitest run` | **113/113** (was 101) |
+| `npx next build` | 11/11 pages |
+| `npm run db:verify` | Schema verified |
+| `npm run verify:live` | **26/26** |
+| `npm run db:push` twice | Idempotent |
+
+---

@@ -196,3 +196,39 @@ export interface MyRequestView {
   /** Present only for an accepted request (FR-30). */
   contact: AcceptedContact | null;
 }
+
+// ---------------------------------------------------------------------------
+// Notifications - amends FR-42, which originally chose no notifications at all
+// ---------------------------------------------------------------------------
+
+/**
+ * The four events that notify someone.
+ *
+ * `withdrawn` is deliberately absent: the passenger performed it themselves, and telling the
+ * driver was the "everything including withdrawals" option that was not chosen.
+ */
+export type NotificationKind =
+  | "request_received"  // to the DRIVER
+  | "request_accepted"  // to the PASSENGER
+  | "request_declined"  // to the PASSENGER
+  | "ride_cancelled";   // to the PASSENGER
+
+export interface AppNotification {
+  id: string;
+  kind: NotificationKind;
+  rideId: string;
+  requestId: string | null;
+  readAt: string | null;
+  createdAt: string;
+}
+
+/** A notification with enough ride context to render a sentence. */
+export interface NotificationView {
+  notification: AppNotification;
+  originName: string;
+  destinationName: string;
+  departsAt: string;
+  /** Title and body, built by lib/notification-text.ts - never stored. */
+  title: string;
+  body: string;
+}
